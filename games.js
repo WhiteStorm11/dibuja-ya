@@ -1,373 +1,185 @@
-const hub = document.getElementById('gameHub');
-const catalogGames = [
-  ['classic', 'Dibuja y adivina', 'Tú dibujas, tu pareja adivina.'],
-  ['challenge', 'Reto de dibujo', 'Escribe el reto que dibujará tu pareja.'],
-  ['word', 'Adivina mi palabra', 'Cinco preguntas de sí o no y una adivinanza.'],
-  ['puzzle', 'Rompecabezas de memes', 'Armen el mismo meme entre los dos.'],
-  ['flag', 'Completen la bandera', 'Uno guía y el otro rellena las partes que faltan.'],
-  ['color', 'Coloreen juntos', 'Rellenen el mismo dibujo, con o sin referencia.']
+const { randomInt } = require('node:crypto');
+
+const flags = [
+  { name: 'Colombia', colors: ['#fcd116', '#003893', '#ce1126'], grid: [0,0,0,0,0,0,1,1,1,2,2,2] },
+  { name: 'Francia', colors: ['#0055a4', '#ffffff', '#ef4135'], grid: [0,1,2,0,1,2,0,1,2,0,1,2] },
+  { name: 'Ucrania', colors: ['#0057b7', '#ffd700'], grid: [0,0,0,0,0,0,1,1,1,1,1,1] },
+  { name: 'Italia', colors: ['#009246', '#ffffff', '#ce2b37'], grid: [0,1,2,0,1,2,0,1,2,0,1,2] }
 ];
-let activity;
-let choice;
-let activityClock;
+const art = [
+  { name: 'Corazón', rows: ['.......','.11.11.','1221221','1222221','.12221.','..121..','...1...'], colors: ['#f43f5e','#fda4af'] },
+  { name: 'Flor', rows: ['...1...','..121..','.12221.','..121..','...3...','.3.3.3.','..333..'], colors: ['#a855f7','#facc15','#22c55e'] },
+  { name: 'Fantasma', rows: ['..111..','.11111.','.12121.','.11111.','.11311.','.11111.','.1.1.1.'], colors: ['#ddd6fe','#312e81','#f472b6'] }
+];
+const palette = ['#f43f5e', '#fda4af', '#a855f7', '#facc15', '#22c55e', '#ddd6fe', '#312e81', '#f472b6', '#38bdf8', '#ffffff'];
+const clean = (value, limit) => typeof value === 'string' ? value.trim().slice(0, limit) : '';
+const normal = value => value.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
 
-function element(tag, label, parent = hub, className = '') {
-  const node = document.createElement(tag);
-  node.textContent = label;
-  node.className = className;
-  parent.append(node);
-  return node;
+function shuffled(size) {
+  const pieces = Array.from({ length: size }, (_, index) => index);
+  for (let index = size - 1; index > 0; index--) {
+    const other = randomInt(index + 1);
+    [pieces[index], pieces[other]] = [pieces[other], pieces[index]];
+  }
+  return pieces;
 }
 
-function actionButton(label, run, parent = hub) {
-  const button = element('button', label, parent, 'game-action');
-  button.type = 'button';
-  button.addEventListener('click', run);
-  return button;
+function publish(io, room) {
+  const activity = room.activity;
+  for (const [index, player] of room.players.entries()) {
+    const { secret, riddle, timer, target, strokes, ...visible } = activity;
+    const guide = index === activity.guide;
+    io.to(player.id).emit('activity', {
+      ...visible, guide,
+      strokes: activity.done ? strokes : undefined,
+      solution: (activity.done || (guide && activity.mode === 'flag')) ? target : undefined,
+      secret: guide || activity.done || activity.mode === 'challenge' ? secret : undefined,
+      riddle: activity.hintUsed || guide ? riddle : undefined
+    });
+  }
 }
 
-function act(type, value, details = {}) {
-  if (socket.connected) socket.emit('activityAction', { type, value, ...details });
+function validPoint(point) {
+  return point && [point.x, point.y].every(value => Number.isFinite(value) && value >= 0 && value <= 1);
 }
 
-function selectGame(mode, options = {}) {
-  choice = undefined;
-  socket.emit('chooseGame', { mode, ...options });
-}
-
-function photoPicker(parent) {
-  const field = element('input', '', parent);
-  field.type = 'file';
-  field.accept = 'image/*';
-  field.hidden = true;
-  const button = actionButton('Usar mi foto · 16 piezas', () => field.click(), parent);
-  const status = element('p', '', parent, 'hub-status');
-  status.setAttribute('role', 'status');
-  field.addEventListener('change', async () => {
-    const file = field.files[0];
-    field.value = '';
-    if (!file || !socket.connected) return;
-    if (file.size > 20000000) {
-      status.textContent = 'Elige una imagen de hasta 20 MB.';
+module.exports = function registerGames(io, socket, currentRoom, memes, startClassic) {
+  socket.on('chooseGame', (data) => {
+    const room = currentRoom();
+    if (!room || room.players.length !== 2 || !data ||
+        !['menu', 'finished', 'activity'].includes(room.state)) return;
+    const previous = room.activity;
+    const mode = data.mode;
+    if (!['classic', 'challenge', 'word', 'puzzle', 'flag', 'color'].includes(mode)) return;
+    if (room.state === 'activity' && previous && !previous.done) return;
+    const photo = mode === 'puzzle' ? data.photo : undefined;
+    if (photo !== undefined && (typeof photo !== 'string' || photo.length > 280000 ||
+        !/^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/]*={0,2}$/.test(photo))) return;
+    clearTimeout(previous?.timer);
+    if (mode === 'classic') {
+      room.activity = undefined;
+      startClassic(room, [4, 6, 10].includes(data.rounds) ? data.rounds : 10);
       return;
     }
-    button.disabled = true;
-    status.textContent = 'Preparando la foto…';
-    let bitmap;
-    try {
-      bitmap = await createImageBitmap(file);
-      const canvas = document.createElement('canvas');
-      const scale = Math.min(1, 640 / Math.max(bitmap.width, bitmap.height));
-      const width = Math.max(1, Math.round(bitmap.width * scale));
-      const height = Math.max(1, Math.round(bitmap.height * scale));
-      canvas.width = canvas.height = Math.max(width, height);
-      const context = canvas.getContext('2d');
-      context.fillStyle = '#fff';
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(bitmap, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height);
-      let photo = canvas.toDataURL('image/jpeg', 0.78);
-      if (photo.length > 280000) photo = canvas.toDataURL('image/jpeg', 0.55);
-      if (photo.length > 280000) throw new Error('Foto demasiado grande');
-      if (field.isConnected && socket.connected) selectGame('puzzle', { photo });
-      status.textContent = '';
-    } catch {
-      status.textContent = 'No pudimos abrir la foto. Prueba con una imagen JPG o PNG.';
-    } finally {
-      bitmap?.close();
-      button.disabled = false;
+
+    const rotation = (room.rotations ||= {});
+    const turn = rotation[mode] || 0;
+    rotation[mode] = turn + 1;
+    const activity = { mode, guide: turn % 2, done: false };
+    room.state = 'activity';
+    room.activity = activity;
+
+    if (mode === 'puzzle') {
+      const images = [...memes.values()];
+      activity.image = photo ? { name: 'Foto de la sala', url: photo } : images[turn % images.length];
+      activity.size = photo || data.size === 4 ? 4 : 3;
+      activity.pieces = shuffled(activity.size ** 2);
+      activity.cells = Array(activity.pieces.length).fill(null);
+    } else if (mode === 'flag') {
+      const flag = flags[turn % flags.length];
+      activity.title = flag.name;
+      activity.colors = flag.colors;
+      activity.target = flag.grid;
+      activity.cells = flag.grid.map((color, index) => index % 3 === 0 ? color : null);
+      activity.fixed = activity.cells.map(color => color !== null);
+    } else if (mode === 'color') {
+      const picture = art[turn % art.length];
+      activity.title = picture.name;
+      activity.colors = palette;
+      activity.target = picture.rows.join('').split('').map(cell => cell === '.' ? -1 :
+        palette.indexOf(picture.colors[Number(cell) - 1]));
+      activity.free = data.free === true;
+      activity.cells = activity.target.map(color => color === -1 ? -1 : null);
+      if (!activity.free) activity.reference = activity.target;
+    } else {
+      activity.phase = 'prepare';
+      if (mode === 'word') activity.questions = [];
+      else activity.strokes = [];
     }
+    publish(io, room);
   });
-}
 
-function openHub() {
-  clearInterval(activityClock);
-  document.getElementById('game').classList.add('hub-open');
-  document.getElementById('roundOverlay').classList.remove('active');
-  hub.hidden = false;
-  hub.replaceChildren();
-  showScreen('game');
-}
+  socket.on('gamesMenu', () => {
+    const room = currentRoom();
+    if (!room || room.players.length !== 2) return;
+    clearInterval(room.timer);
+    clearTimeout(room.nextRound);
+    clearTimeout(room.activity?.timer);
+    room.activity = undefined;
+    room.state = 'menu';
+    io.to(room.code).emit('gamesMenu');
+  });
 
-function showGameMenu() {
-  activity = undefined;
-  choice = undefined;
-  openHub();
-  element('h2', 'Juegos para dos', hub, 'hub-heading');
-  const cards = element('div', '', hub, 'hub-choices');
-  const options = element('div', '', hub, 'hub-controls');
-  for (const [mode, title, description] of catalogGames) {
-    const card = actionButton(title, () => {
-      options.replaceChildren();
-      if (mode === 'classic') {
-        for (const rounds of [4, 6, 10]) {
-          actionButton(`${rounds} rondas`, () => selectGame(mode, { rounds }), options);
-        }
-      } else if (mode === 'puzzle') {
-        for (const size of [3, 4]) {
-          actionButton(`${size ** 2} piezas`, () => selectGame(mode, { size }), options);
-        }
-        photoPicker(options);
-      } else if (mode === 'color') {
-        actionButton('Con referencia', () => selectGame(mode), options);
-        actionButton('Colores libres', () => selectGame(mode, { free: true }), options);
-      } else selectGame(mode);
-      if (options.children.length) options.scrollIntoView({ block: 'nearest' });
-    }, cards);
-    card.classList.add('hub-card');
-    element('span', description, card);
-  }
-}
+  socket.on('activityAction', (action) => {
+    const room = currentRoom();
+    const game = room?.activity;
+    if (room?.state !== 'activity' || !game || game.done || !action) return;
+    const guide = socket.id === room.players[game.guide].id;
+    const { type, index, value } = action;
 
-function grid(parent, columns) {
-  const node = element('div', '', parent, 'hub-grid');
-  node.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
-  return node;
-}
-
-function choose(value, button, parent) {
-  choice = value;
-  for (const item of parent.querySelectorAll('button')) {
-    item.setAttribute('aria-pressed', String(item === button));
-  }
-}
-
-function imagePiece(button, image, size, index) {
-  button.style.backgroundImage = `url("${image.url}")`;
-  button.style.backgroundSize = `${size * 100}% ${size * 100}%`;
-  button.style.backgroundPosition = `${(index % size) * 100 / (size - 1)}% ${Math.floor(index / size) * 100 / (size - 1)}%`;
-}
-
-function renderPuzzle(game) {
-  if (game.cells.includes(choice)) choice = undefined;
-  const status = element('p', game.done ? `¡Meme completo! ${game.image.name}` :
-    `${game.cells.filter(cell => cell !== null).length} de ${game.cells.length} piezas. Toca una pieza y luego su lugar.`, hub, 'hub-status');
-  status.setAttribute('role', 'status');
-  const boards = element('div', '', hub, 'hub-board');
-  const target = element('div', '', boards);
-  element('h3', 'Tablero', target);
-  const slots = grid(target, game.size);
-  game.cells.forEach((cell, index) => {
-    const button = actionButton(cell === null ? String(index + 1) : '', () => {
-      if (choice === undefined) return;
-      if (choice !== index) {
-        status.textContent = 'Esa pieza va en otro lugar. Prueba de nuevo.';
+    if (game.mode === 'puzzle' && type === 'place') {
+      if (!Number.isInteger(index) || index !== value || game.cells[index] !== null ||
+          !game.pieces.includes(value)) return;
+      game.cells[index] = value;
+      game.done = game.cells.every(cell => cell !== null);
+    } else if (game.mode === 'flag' && type === 'paint') {
+      if (guide || !Number.isInteger(index) || index < 0 || index >= game.cells.length ||
+          game.fixed[index] || !Number.isInteger(value) || value < 0 || value >= game.colors.length) return;
+      game.cells[index] = value;
+      game.done = game.cells.every((cell, position) => cell === game.target[position]);
+    } else if (game.mode === 'color' && type === 'paint') {
+      if (!Number.isInteger(index) || index < 0 || index >= game.cells.length ||
+          game.cells[index] === -1 || !Number.isInteger(value) || value < 0 || value >= game.colors.length) return;
+      game.cells[index] = value;
+      game.done = game.cells.every((cell, position) => game.free ? cell !== null : cell === game.target[position]);
+    } else if (game.mode === 'word') {
+      if (guide && type === 'prepare' && game.phase === 'prepare') {
+        const secret = clean(value, 45);
+        const riddle = clean(action.riddle, 160);
+        if (!secret || !riddle || normal(secret) === normal(riddle)) return;
+        game.secret = secret;
+        game.riddle = riddle;
+        game.phase = 'play';
+      } else if (!guide && game.phase === 'play' && type === 'question') {
+        const question = clean(value, 150);
+        if (!question || game.questions.length >= 5 || game.questions.some(item => !item.answer)) return;
+        game.questions.push({ question });
+      } else if (guide && type === 'answer' && ['Sí', 'No'].includes(value)) {
+        const pending = game.questions.at(-1);
+        if (!pending || pending.answer) return;
+        pending.answer = value;
+      } else if (!guide && game.phase === 'play' && type === 'hint') {
+        game.hintUsed = true;
+      } else if (!guide && game.phase === 'play' && type === 'guess') {
+        const guess = clean(value, 45);
+        if (!guess) return;
+        game.lastGuess = guess;
+        game.correct = normal(guess) === normal(game.secret);
+        game.done = game.correct;
+      } else if (!guide && game.phase === 'play' && type === 'reveal') {
+        game.done = true;
+      } else return;
+    } else if (game.mode === 'challenge') {
+      if (guide && type === 'prepare' && game.phase === 'prepare') {
+        const prompt = clean(value, 150);
+        if (!prompt) return;
+        game.secret = prompt;
+        game.phase = 'play';
+        game.deadline = Date.now() + 45000;
+        game.timer = setTimeout(() => {
+          game.done = true;
+          publish(io, room);
+        }, 45000);
+      } else if (!guide && game.phase === 'play' && type === 'stroke') {
+        if (game.strokes.length >= 3500 || !validPoint(action.from) || !validPoint(action.to)) return;
+        game.strokes.push({ from: action.from, to: action.to });
         return;
-      }
-      act('place', choice, { index });
-    }, slots);
-    button.setAttribute('aria-label', `Lugar ${index + 1}`);
-    button.disabled = cell !== null;
-    if (cell !== null) imagePiece(button, game.image, game.size, cell);
+      } else if (!guide && game.phase === 'play' && type === 'finish') {
+        clearTimeout(game.timer);
+        game.done = true;
+      } else return;
+    } else return;
+
+    publish(io, room);
   });
-  if (game.done) {
-    actionButton('Otro meme', () => selectGame('puzzle', { size: game.size }));
-    photoPicker(hub);
-    return;
-  }
-  const source = element('div', '', boards);
-  element('h3', 'Piezas', source);
-  const pieces = grid(source, game.size);
-  game.pieces.filter(piece => !game.cells.includes(piece)).forEach((piece, index) => {
-    const button = actionButton('', () => choose(piece, button, pieces), pieces);
-    button.setAttribute('aria-label', `Pieza disponible ${index + 1}`);
-    button.setAttribute('aria-pressed', String(choice === piece));
-    imagePiece(button, game.image, game.size, piece);
-  });
-}
-
-function paintBoard(cells, columns, colors, parent, paint, fixed = []) {
-  const board = grid(parent, columns);
-  cells.forEach((color, index) => {
-    const button = actionButton('', () => paint?.(index), board);
-    button.setAttribute('aria-label', `Casilla ${index + 1}, ${colors[color] || 'sin pintar'}`);
-    button.disabled = !paint || fixed[index] || color === -1;
-    if (color === -1) button.classList.add('blank');
-    if (colors[color]) button.style.backgroundColor = colors[color];
-  });
-}
-
-function saveArt(game) {
-  const drawing = document.createElement('canvas');
-  drawing.width = drawing.height = 560;
-  const context = drawing.getContext('2d');
-  game.cells.forEach((color, index) => {
-    if (color < 0 || color === null) return;
-    context.fillStyle = game.colors[color];
-    context.fillRect((index % 7) * 80, Math.floor(index / 7) * 80, 80, 80);
-  });
-  const link = document.createElement('a');
-  link.download = 'dibuja-ya-coloreado.png';
-  link.href = drawing.toDataURL('image/png');
-  link.click();
-}
-
-function renderPaint(game) {
-  const flag = game.mode === 'flag';
-  const columns = flag ? 3 : 7;
-  const canPaint = !game.done && (!flag || !game.guide);
-  element('h3', game.title);
-  element('p', game.done ? '¡Lo completaron!' : flag ?
-    (game.guide ? 'Guía a tu pareja por chat. Solo tú ves la referencia.' : 'Completa las casillas con las indicaciones de tu pareja.') :
-    (game.free ? 'Elijan juntos los colores.' : 'Rellenen las casillas siguiendo la referencia.'), hub, 'hub-status');
-  if (canPaint) {
-    const palette = element('div', '', hub, 'hub-palette');
-    for (const [index, color] of game.colors.entries()) {
-      const button = actionButton(`Color ${index + 1}`, () => choose(index, button, palette), palette);
-      button.style.borderBottom = `5px solid ${color}`;
-      button.setAttribute('aria-pressed', String(choice === index));
-    }
-  }
-  const boards = element('div', '', hub, 'hub-board');
-  const main = element('div', '', boards);
-  element('h3', 'Tablero compartido', main);
-  paintBoard(game.cells, columns, game.colors, main, canPaint ? index => {
-    if (choice !== undefined) act('paint', choice, { index });
-  } : undefined, game.fixed);
-  const reference = flag ? game.solution : game.reference;
-  if (reference) {
-    const panel = element('div', '', boards);
-    element('h3', 'Referencia', panel);
-    paintBoard(reference, columns, game.colors, panel);
-  }
-  if (game.done) {
-    if (!flag) actionButton('Guardar PNG', () => saveArt(game));
-    actionButton(flag ? 'Siguiente bandera' : 'Otro dibujo', () => selectGame(game.mode, { free: game.free }));
-  }
-}
-
-function input(label, limit) {
-  const field = element('input', '', hub, 'hub-field');
-  field.placeholder = label;
-  field.setAttribute('aria-label', label);
-  field.maxLength = limit;
-  field.autocomplete = 'off';
-  return field;
-}
-
-function renderWord(game) {
-  if (game.phase === 'prepare') {
-    if (!game.guide) return element('p', 'Tu pareja está preparando la palabra.');
-    const secret = input('Palabra secreta', 45);
-    const riddle = input('Adivinanza para la pista', 160);
-    actionButton('Empezar', () => {
-      if (!secret.value.trim() || !riddle.value.trim() ||
-          secret.value.trim().toLowerCase() === riddle.value.trim().toLowerCase()) {
-        riddle.setCustomValidity('Escribe una adivinanza diferente de la palabra.');
-        riddle.reportValidity();
-        riddle.setCustomValidity('');
-        return;
-      }
-      act('prepare', secret.value, { riddle: riddle.value });
-    });
-    return;
-  }
-  if (game.secret) element('p', `Palabra: ${game.secret}`);
-  if (game.riddle) element('p', `Adivinanza: ${game.riddle}`);
-  element('p', `${game.questions.length} de 5 preguntas`);
-  const list = element('ol', '', hub, 'hub-questions');
-  for (const item of game.questions) element('li', `${item.question} — ${item.answer || 'Pendiente'}`, list);
-  if (game.lastGuess) element('p', game.correct ? '¡Acertaron!' : `Intento: ${game.lastGuess}`);
-  if (game.done) {
-    actionButton('Cambiar roles', () => selectGame('word'));
-    return;
-  }
-  if (game.guide) {
-    if (game.questions.some(item => !item.answer)) {
-      for (const answer of ['Sí', 'No']) actionButton(answer, () => act('answer', answer));
-    }
-    return;
-  }
-  if (game.questions.length < 5 && !game.questions.some(item => !item.answer)) {
-    const question = input('Pregunta de sí o no', 150);
-    actionButton('Preguntar', () => act('question', question.value));
-  }
-  const guess = input('Tu respuesta', 45);
-  actionButton('Adivinar', () => act('guess', guess.value));
-  if (!game.hintUsed) actionButton('💡 Pista', () => act('hint'));
-  actionButton('Revelar palabra', () => act('reveal'));
-}
-
-function renderChallenge(game) {
-  if (game.phase === 'prepare') {
-    if (!game.guide) return element('p', 'Tu pareja está preparando el reto.');
-    const prompt = input('¿Qué quieres que dibuje?', 150);
-    actionButton('Enviar reto', () => act('prepare', prompt.value));
-    return;
-  }
-  if (game.secret) element('p', game.secret);
-  const clock = element('p', '', hub, 'hub-status');
-  if (game.done) {
-    clock.textContent = '¡Este es el resultado!';
-    actionButton('Cambiar roles', () => selectGame('challenge'));
-  } else {
-    const tick = () => {
-      clock.textContent = `${game.guide ? 'Tu pareja está dibujando. ' : ''}${Math.max(0, Math.ceil((game.deadline - Date.now()) / 1000))} s`;
-    };
-    tick();
-    activityClock = setInterval(tick, 250);
-    if (game.guide) return;
-    actionButton('Mostrar dibujo', () => act('finish'));
-  }
-  const board = element('canvas', '', hub, 'challenge-canvas');
-  board.width = 600;
-  board.height = 420;
-  board.setAttribute('aria-label', 'Lienzo del reto');
-  const context = board.getContext('2d');
-  context.lineWidth = 5;
-  context.lineCap = 'round';
-  function line(from, to) {
-    context.beginPath();
-    context.moveTo(from.x * board.width, from.y * board.height);
-    context.lineTo(to.x * board.width, to.y * board.height);
-    context.stroke();
-  }
-  if (game.done) {
-    for (const stroke of game.strokes) line(stroke.from, stroke.to);
-    return;
-  }
-  let last;
-  function position(event) {
-    const rect = board.getBoundingClientRect();
-    return {
-      x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
-      y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height))
-    };
-  }
-  board.addEventListener('pointerdown', event => {
-    board.setPointerCapture(event.pointerId);
-    last = position(event);
-  });
-  board.addEventListener('pointermove', event => {
-    if (!last || !socket.connected) return;
-    const next = position(event);
-    line(last, next);
-    act('stroke', undefined, { from: last, to: next });
-    last = next;
-  });
-  for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) {
-    board.addEventListener(event, () => { last = undefined; });
-  }
-}
-
-socket.on('activity', game => {
-  if (activity?.mode !== game.mode || activity?.done) choice = undefined;
-  activity = game;
-  openHub();
-  element('h2', catalogGames.find(([mode]) => mode === game.mode)[1], hub, 'hub-heading');
-  if (game.mode === 'puzzle') renderPuzzle(game);
-  else if (game.mode === 'flag' || game.mode === 'color') renderPaint(game);
-  else if (game.mode === 'word') renderWord(game);
-  else renderChallenge(game);
-});
-socket.on('gamesMenu', showGameMenu);
-socket.on('classicStart', () => {
-  activity = undefined;
-  clearInterval(activityClock);
-  hub.hidden = true;
-  document.getElementById('game').classList.remove('hub-open');
-  showScreen('game');
-});
-document.getElementById('gamesBack').addEventListener('click', () => {
-  if (!hub.hidden && !activity) return;
-  if (activity?.done || window.confirm('¿Volver a los juegos para los dos?')) socket.emit('gamesMenu');
-});
+};
