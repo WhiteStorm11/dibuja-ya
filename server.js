@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const registerGames = require('./games');
 
 const app = express();
 const server = http.createServer(app);
@@ -10,35 +11,6 @@ const io = new Server(server, {
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
-
-// --- Word list (Spanish) ---
-const WORDS = [
-  'perro', 'gato', 'casa', 'sol', 'luna', 'árbol', 'flor', 'carro',
-  'avión', 'barco', 'montaña', 'río', 'playa', 'estrella', 'corazón',
-  'guitarra', 'pelota', 'zapato', 'sombrero', 'lentes', 'reloj',
-  'teléfono', 'computadora', 'pizza', 'hamburguesa', 'helado', 'pastel',
-  'dinosaurio', 'dragón', 'unicornio', 'robot', 'cohete', 'planeta',
-  'corona', 'espada', 'castillo', 'pirata', 'fantasma', 'araña',
-  'mariposa', 'serpiente', 'elefante', 'jirafa', 'león', 'delfín',
-  'tiburón', 'pulpo', 'tortuga', 'pingüino', 'loro', 'águila',
-  'bicicleta', 'tren', 'autobús', 'moto', 'globo', 'paraguas',
-  'cámara', 'libro', 'lápiz', 'tijeras', 'martillo', 'llave',
-  'bombilla', 'vela', 'campana', 'bandera', 'mapa', 'brújula',
-  'ancla', 'dado', 'paleta', 'cactus', 'volcán', 'arcoíris',
-  'nube', 'rayo', 'fuego', 'agua', 'hielo', 'tornado',
-  'payaso', 'astronauta', 'ninja', 'sirena', 'ángel', 'momia',
-  'vampiro', 'zombie', 'alienígena', 'superhéroe', 'mago', 'hada',
-  'piano', 'batería', 'trompeta', 'violín', 'micrófono', 'audífonos',
-  'televisor', 'control', 'ratón', 'teclado', 'impresora', 'USB',
-  'sandía', 'piña', 'plátano', 'manzana', 'cereza', 'uva',
-  'zanahoria', 'brócoli', 'champiñón', 'maíz', 'huevo', 'queso',
-  'café', 'jugo', 'palomitas', 'dona', 'galleta', 'chocolate',
-  'cama', 'silla', 'mesa', 'lámpara', 'espejo', 'escalera',
-  'puerta', 'ventana', 'chimenea', 'piscina', 'columpio', 'resbalón',
-  'balón', 'raqueta', 'patines', 'esquí', 'surfear', 'boxeo',
-  'corona', 'anillo', 'collar', 'diamante', 'cofre', 'medalla',
-  'semáforo', 'taxi', 'ambulancia', 'policía', 'bombero', 'hospital'
-];
 
 // --- Room management ---
 const rooms = new Map();
@@ -56,21 +28,35 @@ app.get('/api/memes', (_, res) => {
 });
 
 const clues = new Map([
-  ['perro', 'Ladra'], ['gato', 'Bigotes'], ['casa', 'Hogar'],
-  ['luna', 'Satélite'], ['sol', 'Estrella'], ['árbol', 'Raíces'],
-  ['flor', 'Pétalos'], ['carro', 'Volante'], ['avión', 'Altitud'],
-  ['barco', 'Navegación'], ['montaña', 'Cumbre'], ['río', 'Corriente'],
-  ['playa', 'Arena'], ['guitarra', 'Cuerdas'], ['pelota', 'Rebote'],
-  ['zapato', 'Cordones'], ['reloj', '¿Qué tiene agujas y nunca cose?'],
-  ['pizza', 'Porciones'], ['helado', 'Congelado'], ['dinosaurio', 'Fósil'],
-  ['dragón', 'Escupe fuego en los cuentos.'], ['cohete', 'Despegue'],
+  ['perro', 'Muevo la cola cuando me alegro y ladro aunque no sepa hablar.'],
+  ['gato', 'Tengo bigotes y ronroneo sin llevar motor.'],
+  ['casa', 'Tengo puertas y ventanas y te espero cuando vuelves.'],
+  ['luna', 'A veces parezco una uña y otras un plato redondo.'],
+  ['sol', 'Salgo cada mañana y puedo quemarte sin tocarte.'],
+  ['árbol', 'Bebo con los pies y cambio de abrigo con las estaciones.'],
+  ['avión', 'Tengo alas, pero nunca las bato.'],
+  ['barco', 'Me muevo sin ruedas por un camino de agua.'],
+  ['río', 'Tengo corriente y nunca necesito enchufe.'],
+  ['guitarra', 'Tengo cuerdas, pero no sirvo para amarrar nada.'],
+  ['pelota', 'Me golpean y salgo saltando sin quejarme.'],
+  ['reloj', 'Tengo agujas y nunca coso.'],
+  ['pizza', 'Soy redonda, llego en una caja cuadrada y me comen en triángulos.'],
+  ['helado', 'Entre más calor hace, más rápido desaparezco.'],
+  ['dragón', 'En los cuentos vuelo y hago fogatas sin fósforos.'],
   ['fantasma', 'Aparece en historias de casas embrujadas.'],
-  ['elefante', 'Trompa'], ['jirafa', 'Cuello'], ['pulpo', 'Ocho brazos'],
+  ['elefante', 'Puedo beber agua con una nariz muy larga.'],
+  ['jirafa', 'Alcanzo las hojas altas sin trepar al árbol.'],
+  ['pulpo', 'Con mis brazos podría abrazar a ocho personas a la vez.'],
   ['pingüino', 'Un ave que nada y viste de blanco y negro.'],
-  ['bicicleta', 'Pedales'], ['paraguas', 'Se abre cuando cae agua del cielo.'],
-  ['libro', 'Páginas'], ['brújula', 'Norte'], ['volcán', 'Lava'],
+  ['bicicleta', 'Tengo dos ruedas y avanzo cuando tú haces el esfuerzo.'],
+  ['paraguas', 'Abro mis costillas cuando empieza a llover.'],
+  ['libro', 'Puedo contarte historias sin decir una sola palabra en voz alta.'],
+  ['volcán', 'Soy una montaña que a veces escupe roca derretida.'],
   ['arcoíris', 'Aparece cuando se encuentran la lluvia y el sol.'],
-  ['piano', 'Teclas'], ['cámara', 'Fotografía'], ['dado', 'Tiene caras pero no ojos.']
+  ['piano', 'Tengo teclas y con ellas hago música.'],
+  ['cámara', 'Atrapo un instante sin ponerle una jaula.'],
+  ['dado', 'Tengo caras y puntitos, pero ningún ojo.'],
+  ['burbuja', 'Me escapo flotando del jabón y mi nombre tiene dos B.']
 ]);
 
 function generateRoomCode() {
@@ -84,8 +70,8 @@ function generateRoomCode() {
 }
 
 function getRandomWord(usedWords) {
-  const available = WORDS.filter(w => !usedWords.includes(w));
-  if (available.length === 0) return WORDS[Math.floor(Math.random() * WORDS.length)];
+  const available = [...clues.keys()].filter(w => !usedWords.includes(w));
+  if (available.length === 0) return 'reloj';
   return available[Math.floor(Math.random() * available.length)];
 }
 
@@ -169,7 +155,7 @@ function startRound(room) {
 
       // Switch drawer and start next round after delay
       room.drawerIndex = 1 - room.drawerIndex;
-      setTimeout(() => startRound(room), 3000);
+      room.nextRound = setTimeout(() => startRound(room), 3000);
     }
   }, 1000);
 }
@@ -186,8 +172,6 @@ function endGame(room) {
     scores: room.players.map(p => ({ name: p.name, score: p.score }))
   });
 
-  // Cleanup room after 30s
-  setTimeout(() => rooms.delete(room.code), 30000);
 }
 
 // --- Socket.IO ---
@@ -200,10 +184,19 @@ io.on('connection', (socket) => {
     const room = rooms.get(socket.data.roomCode);
     return room?.players.some(player => player.id === socket.id) ? room : undefined;
   }
+  registerGames(io, socket, currentRoom, memes, (room, rounds) => {
+    room.round = 0;
+    room.totalRounds = rounds;
+    room.usedWords = [];
+    room.players.forEach(player => { player.score = 0; });
+    room.drawerIndex = Math.random() < 0.5 ? 0 : 1;
+    io.to(room.code).emit('classicStart');
+    startRound(room);
+  });
 
   function sendChat(message) {
     const room = currentRoom();
-    if (!room || room.state === 'finished') return;
+    if (!room) return;
     const now = Date.now();
     if (now - (socket.data.lastChatAt || 0) < 600) return;
     socket.data.lastChatAt = now;
@@ -227,8 +220,7 @@ io.on('connection', (socket) => {
         room.players[room.drawerIndex].id === socket.id) return;
     room.hintUsed = true;
     const word = room.currentWord;
-    const hint = clues.get(word) || `Comienza con «${word[0].toUpperCase()}» y termina con «${word.at(-1).toUpperCase()}».`;
-    io.to(socket.id).emit('hint', hint);
+    io.to(socket.id).emit('hint', clues.get(word));
   });
 
   socket.on('createRoom', (name, callback) => {
@@ -269,11 +261,7 @@ io.on('connection', (socket) => {
       players: room.players.map(p => p.name)
     });
 
-    // Start game after short delay
-    setTimeout(() => {
-      room.drawerIndex = Math.random() < 0.5 ? 0 : 1;
-      startRound(room);
-    }, 2000);
+    room.state = 'menu';
   });
 
   socket.on('draw', (data) => {
@@ -333,7 +321,7 @@ io.on('connection', (socket) => {
 
       // Switch turns
       room.drawerIndex = 1 - room.drawerIndex;
-      setTimeout(() => startRound(room), 3000);
+      room.nextRound = setTimeout(() => startRound(room), 3000);
     }
   });
 
@@ -344,6 +332,8 @@ io.on('connection', (socket) => {
       disconnectTimers.delete(socket.id);
       if (rooms.get(room.code) !== room || io.sockets.sockets.has(socket.id)) return;
       clearInterval(room.timer);
+      clearTimeout(room.nextRound);
+      clearTimeout(room.activity?.timer);
       rooms.delete(room.code);
       io.to(room.code).emit('opponentLeft');
       io.in(room.code).socketsLeave(room.code);
