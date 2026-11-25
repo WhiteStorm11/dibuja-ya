@@ -432,6 +432,7 @@
     .chat-messages { min-height: 48px; max-height: 105px; }
   }
 </style>
+<link rel="stylesheet" href="/games.css">
 </head>
 <body>
 <div id="connectionStatus" role="status"></div>
@@ -483,6 +484,7 @@
     <span class="timer-badge" id="timerBadge">60</span>
     <div class="scores-mini" id="scoresMini"></div>
     <button type="button" class="game-action" id="musicToggle" aria-pressed="false">🎵 Música</button>
+    <button type="button" class="game-action" id="gamesBack">Juegos</button>
   </div>
 
   <div class="word-display">
@@ -499,6 +501,7 @@
     <!-- Colors filled by JS -->
   </div>
 
+  <section id="gameHub" hidden></section>
   <div class="chat-area" id="chatArea">
     <div class="chat-messages" id="chatMessages"></div>
     <div class="chat-input-row" id="chatInputRow">
@@ -531,7 +534,7 @@
   <div class="trophy">🏆</div>
   <div class="winner-name" id="winnerName">¡Ganador!</div>
   <div class="final-scores" id="finalScores"></div>
-  <button class="btn-play-again" onclick="location.reload()">🔄 Jugar de nuevo</button>
+  <button class="btn-play-again" onclick="socket.emit('gamesMenu')">Volver a los juegos</button>
 </div>
 
 <!-- CONFETTI -->
@@ -954,7 +957,7 @@ document.getElementById('musicToggle').addEventListener('click', async (event) =
 
 // --- Game events ---
 socket.on('playerJoined', (data) => {
-  showScreen('game');
+  showGameMenu();
   addChatMsg('', `🎮 ¡${data.players.join(' y ')} están listos!`, 'system');
 });
 
@@ -1110,5 +1113,6 @@ document.getElementById('nameInput').addEventListener('keydown', (e) => {
   }
 });
 </script>
+<script src="/games.js"></script>
 </body>
 </html>
