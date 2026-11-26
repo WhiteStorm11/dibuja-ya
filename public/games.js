@@ -7,6 +7,28 @@ const catalogGames = [
   ['flag', 'Completen la bandera', 'Uno guía y el otro rellena las partes que faltan.'],
   ['color', 'Coloreen juntos', 'Rellenen el mismo dibujo, con o sin referencia.']
 ];
+const drawingModes = new Set(['classic', 'challenge', 'color']);
+const challengeIdeas = [
+  'Un gato vendiendo empanadas en la Luna', 'Una arepa con capa de superhéroe',
+  'Un dinosaurio tratando de tomarse una selfie', 'Una tortuga ganando una carrera de Fórmula 1',
+  'Dos fantasmas que se asustan entre sí', 'Un pingüino tomando el sol en Cartagena',
+  'Un robot enamorado de una tostadora', 'Un volcán que hace burbujas de jabón',
+  'Una abeja repartiendo pizzas en bicicleta', 'Un aguacate aprendiendo a bailar salsa',
+  'Un perro dirigiendo una orquesta de gatos', 'Una ballena que se olvidó de su paraguas',
+  'Un cocodrilo en la silla del dentista', 'Una montaña rusa que pasa por las nubes',
+  'Un caracol haciendo entregas urgentes', 'Una sirena jugando fútbol bajo el agua',
+  'Un monstruo que tiene miedo a las cosquillas', 'Un conejo con el trabajo de cuidar la Luna',
+  'Una sandía haciendo surf', 'Una impresora que solo imprime hamburguesas',
+  'Un dragón preparando un chocolate caliente', 'Un pulpo jugando ocho partidas a la vez',
+  'Una medusa dando clases de baile', 'Dos marcianos celebrando un cumpleaños',
+  'Un oso tratando de esconderse detrás de una flor', 'Un mapache robándose una piñata',
+  'Una flor tomando fotos en un safari', 'Un tiburón cuidando una tienda de dulces',
+  'Un zorro tratando de caminar con tacones', 'Un cohete que aterriza en un plato de sopa',
+  'Una rana presentando el noticiero', 'Un dinosaurio haciendo mercado con un carrito diminuto',
+  'Un pollito con su propia banda de rock', 'Dos pandas armando un mueble sin instrucciones',
+  'Un extraterrestre descubriendo el café', 'Un perro y un gato cambiando de trabajo'
+];
+const colorNames = ['Rojo', 'Rosa claro', 'Morado', 'Amarillo', 'Verde', 'Lavanda', 'Índigo', 'Fucsia', 'Azul', 'Blanco', 'Naranja'];
 let activity;
 let choice;
 let activityClock;
@@ -96,10 +118,11 @@ function showGameMenu() {
   const cards = element('div', '', hub, 'hub-choices');
   const options = element('div', '', hub, 'hub-controls');
   for (const [mode, title, description] of catalogGames) {
+    if (!drawingModes.has(mode)) continue;
     const card = actionButton(title, () => {
       options.replaceChildren();
       if (mode === 'classic') {
-        for (const rounds of [4, 6, 10]) {
+        for (const rounds of [4, 6, 10, 15, 20, 30]) {
           actionButton(`${rounds} rondas`, () => selectGame(mode, { rounds }), options);
         }
       } else if (mode === 'puzzle') {
@@ -186,19 +209,43 @@ function paintBoard(cells, columns, colors, parent, paint, fixed = []) {
   });
 }
 
-function saveArt(game) {
-  const drawing = document.createElement('canvas');
-  drawing.width = drawing.height = 560;
-  const context = drawing.getContext('2d');
-  game.cells.forEach((color, index) => {
-    if (color < 0 || color === null) return;
-    context.fillStyle = game.colors[color];
-    context.fillRect((index % 7) * 80, Math.floor(index / 7) * 80, 80, 80);
-  });
+function saveArt(drawing) {
   const link = document.createElement('a');
   link.download = 'dibuja-ya-coloreado.png';
   link.href = drawing.toDataURL('image/png');
   link.click();
+}
+
+function illustration(game, cells, parent, paint) {
+  const canvas = element('canvas', '', parent, 'color-illustration');
+  canvas.width = 640;
+  canvas.height = 520;
+  canvas.setAttribute('aria-label', game.title);
+  const context = canvas.getContext('2d');
+  context.scale(2, 2);
+  context.fillStyle = '#fff';
+  context.fillRect(0, 0, 320, 260);
+  context.strokeStyle = '#211833';
+  context.lineJoin = 'round';
+  context.lineCap = 'round';
+  context.lineWidth = 2.5;
+  const paths = game.regions.map(region => new Path2D(region.path));
+  paths.forEach((path, index) => {
+    context.fillStyle = game.colors[cells[index]] || '#fff';
+    context.fill(path);
+    context.stroke(path);
+  });
+  context.stroke(new Path2D(game.details));
+  if (paint) {
+    canvas.addEventListener('click', event => {
+      const rect = canvas.getBoundingClientRect();
+      const x = (event.clientX - rect.left) * canvas.width / rect.width;
+      const y = (event.clientY - rect.top) * canvas.height / rect.height;
+      const index = paths.findLastIndex(path => context.isPointInPath(path, x, y));
+      if (index >= 0) paint(index);
+    });
+  }
+  return canvas;
 }
 
 function renderPaint(game) {
@@ -212,7 +259,7 @@ function renderPaint(game) {
   if (canPaint) {
     const palette = element('div', '', hub, 'hub-palette');
     for (const [index, color] of game.colors.entries()) {
-      const button = actionButton(`Color ${index + 1}`, () => choose(index, button, palette), palette);
+      const button = actionButton(flag ? `Color ${index + 1}` : colorNames[index], () => choose(index, button, palette), palette);
       button.style.borderBottom = `5px solid ${color}`;
       button.setAttribute('aria-pressed', String(choice === index));
     }
@@ -220,17 +267,28 @@ function renderPaint(game) {
   const boards = element('div', '', hub, 'hub-board');
   const main = element('div', '', boards);
   element('h3', 'Tablero compartido', main);
-  paintBoard(game.cells, columns, game.colors, main, canPaint ? index => {
+  const paint = canPaint ? index => {
     if (choice !== undefined) act('paint', choice, { index });
-  } : undefined, game.fixed);
+  } : undefined;
+  let drawing;
+  if (flag) {
+    paintBoard(game.cells, columns, game.colors, main, paint, game.fixed);
+  } else {
+    drawing = illustration(game, game.cells, main, paint);
+    if (paint) {
+      const regions = element('div', '', main, 'hub-controls');
+      game.regions.forEach((region, index) => actionButton(region.name, () => paint(index), regions));
+    }
+  }
   const reference = flag ? game.solution : game.reference;
   if (reference) {
     const panel = element('div', '', boards);
     element('h3', 'Referencia', panel);
-    paintBoard(reference, columns, game.colors, panel);
+    if (flag) paintBoard(reference, columns, game.colors, panel);
+    else illustration(game, reference, panel);
   }
   if (game.done) {
-    if (!flag) actionButton('Guardar PNG', () => saveArt(game));
+    if (!flag) actionButton('Guardar PNG', () => saveArt(drawing));
     actionButton(flag ? 'Siguiente bandera' : 'Otro dibujo', () => selectGame(game.mode, { free: game.free }));
   }
 }
@@ -291,6 +349,12 @@ function renderChallenge(game) {
   if (game.phase === 'prepare') {
     if (!game.guide) return element('p', 'Tu pareja está preparando el reto.');
     const prompt = input('¿Qué quieres que dibuje?', 150);
+    const ideas = [...challengeIdeas];
+    actionButton('🎲 Dame una idea', () => {
+      if (!ideas.length) ideas.push(...challengeIdeas);
+      const [idea] = ideas.splice(Math.floor(Math.random() * ideas.length), 1);
+      prompt.value = idea;
+    });
     actionButton('Enviar reto', () => act('prepare', prompt.value));
     return;
   }
@@ -371,4 +435,3 @@ document.getElementById('gamesBack').addEventListener('click', () => {
   if (!hub.hidden && !activity) return;
   if (activity?.done || window.confirm('¿Volver a los juegos para los dos?')) socket.emit('gamesMenu');
 });
-
