@@ -56,7 +56,25 @@ const clues = new Map([
   ['piano', 'Tengo teclas y con ellas hago música.'],
   ['cámara', 'Atrapo un instante sin ponerle una jaula.'],
   ['dado', 'Tengo caras y puntitos, pero ningún ojo.'],
-  ['burbuja', 'Me escapo flotando del jabón y mi nombre tiene dos B.']
+  ['burbuja', 'Me escapo flotando del jabón y mi nombre tiene dos B.'],
+  ['tortuga', 'Cargo mi refugio a cuestas y jamás llevo prisa.'],
+  ['abeja', 'Visito flores y fabrico algo dulce en casa.'],
+  ['araña', 'Tejo sin agujas y mi tela atrapa visitas.'],
+  ['globo', 'Me llenas de aire y puedo escaparme por el cielo.'],
+  ['tijeras', 'Tengo dos hojas y nunca he sido un libro.'],
+  ['martillo', 'Le doy en la cabeza a los clavos para ayudarlos a entrar.'],
+  ['ancla', 'Me lanzan al agua para que el barco se quede quieto.'],
+  ['vela', 'Alumbro mientras me hago cada vez más pequeña.'],
+  ['campana', 'Tengo lengua y hablo cuando me balancean.'],
+  ['robot', 'Puedo seguir tus órdenes sin respirar ni pestañear.'],
+  ['cactus', 'Guardo agua aunque vivo donde casi nunca llueve.'],
+  ['tren', 'Llevo muchos vagones y sigo un camino hecho de rieles.'],
+  ['castillo', 'Tengo torres y solían defenderme desde mis muros.'],
+  ['sofá', 'Tengo brazos y respaldo, y me buscan para descansar.'],
+  ['sandía', 'Visto de verde por fuera y escondo pepitas en mi barriga roja.'],
+  ['espejo', 'Me miras y siempre te devuelvo la mirada.'],
+  ['huevo', 'Tengo cáscara y puedo acabar en una tortilla o en un nido.'],
+  ['llave', 'Soy pequeña, tengo dientes y puedo abrirte la puerta.']
 ]);
 
 function generateRoomCode() {
