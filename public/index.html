@@ -24,12 +24,17 @@
     --text-dim: rgba(255,255,255,0.6);
   }
 
+  html, body {
+    max-inline-size: 100%;
+    overflow-x: clip;
+    overscroll-behavior-x: none;
+    touch-action: pan-y pinch-zoom;
+  }
   body {
     font-family: 'Nunito', sans-serif;
     background: linear-gradient(135deg, var(--bg) 0%, var(--bg2) 50%, #16213e 100%);
     color: var(--text);
     min-height: 100dvh;
-    overflow-x: hidden;
   }
 
   /* ===== SCREENS ===== */
@@ -408,6 +413,12 @@
   .chat-input-row input { min-width: 0; }
   .chat-msg { overflow-wrap: anywhere; }
   .word-hint { overflow-wrap: anywhere; }
+  .copy-target {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  #copyWord { margin-top: 6px; }
   .game-action {
     min-height: 44px; padding: 7px 11px; border: 0; border-radius: 10px;
     background: #43375d; color: white; font: inherit; cursor: pointer;
@@ -423,6 +434,16 @@
   #hintText { color: var(--accent2); margin: 4px 0; }
   #connectionStatus { position: fixed; top: 8px; right: 8px; z-index: 20; background: #43375d; padding: 8px 12px; border-radius: 8px; }
   #connectionStatus:empty { display: none; }
+  .music-panel { width: min(100%, 1050px); margin-inline: auto; padding: 8px 14px; background: rgba(0,0,0,.22); }
+  .music-panel summary { min-height: 44px; padding: 10px 0; cursor: pointer; font-weight: 800; }
+  .music-panel p { margin: 0 0 8px; }
+  .music-panel a { color: var(--accent2); }
+  .music-panel iframe { display: block; width: min(100%, 480px); height: clamp(200px, 56.25vw, 270px); border: 0; border-radius: 10px; margin-bottom: 8px; }
+  @media (pointer: coarse) {
+    .tools { flex-wrap: wrap; overflow-x: clip; justify-content: center; }
+    .tools input[type="range"] { touch-action: none; }
+    input:not([type="range"]), textarea, select { font-size: max(16px, 1em); }
+  }
   @media (max-width: 480px) {
     .game-header, .chat-input-row { padding-inline: 8px; }
     .chat-input-row { gap: 5px; }
@@ -436,6 +457,12 @@
 </head>
 <body>
 <div id="connectionStatus" role="status"></div>
+<details class="music-panel" id="musicPanel">
+  <summary>🎵 Lana Del Rey</summary>
+  <p>Pulsa ▶ en el reproductor una vez. La música sigue al cambiar de juego o de ronda.</p>
+  <div id="musicPlayer"></div>
+  <p><a href="https://www.youtube.com/@LanaDelRey" target="_blank" rel="noopener noreferrer">Abrir el canal oficial en YouTube</a></p>
+</details>
 
 <!-- LOBBY -->
 <div id="lobby" class="screen active">
@@ -471,7 +498,7 @@
 <div id="waiting" class="screen">
   <span class="logo-emoji">⏳</span>
   <p class="waiting-text">Comparte este código con tu amigo:</p>
-  <div class="room-code-display" id="roomCodeDisplay">----</div>
+  <div class="room-code-display copy-target" id="roomCodeDisplay">----</div>
   <button class="btn-copy" onclick="copyCode()">📋 Copiar código</button>
   <div class="spinner"></div>
   <p class="waiting-text">Esperando al otro jugador...</p>
@@ -483,13 +510,13 @@
     <span class="round-badge" id="roundBadge">Ronda 1/10</span>
     <span class="timer-badge" id="timerBadge">60</span>
     <div class="scores-mini" id="scoresMini"></div>
-    <button type="button" class="game-action" id="musicToggle" aria-pressed="false">🎵 Música</button>
     <button type="button" class="game-action" id="gamesBack">Juegos</button>
   </div>
 
   <div class="word-display">
     <div class="word-role" id="wordRole"></div>
-    <div class="word-hint" id="wordHint"></div>
+    <div class="word-hint copy-target" id="wordHint"></div>
+    <button class="game-action" type="button" id="copyWord" hidden>Copiar palabra</button>
     <p id="hintText" role="status" hidden></p>
   </div>
 
@@ -613,12 +640,27 @@ function joinRoom() {
   });
 }
 
-function copyCode() {
-  navigator.clipboard.writeText(myRoomCode).catch(() => {});
-  const btn = document.querySelector('.btn-copy');
-  btn.textContent = '✅ ¡Copiado!';
-  setTimeout(() => btn.textContent = '📋 Copiar código', 1500);
+const copyTimers = new WeakMap();
+
+async function copyText(text, button, label) {
+  if (!text) return;
+  clearTimeout(copyTimers.get(button));
+  try {
+    await navigator.clipboard.writeText(text);
+    button.textContent = '✅ ¡Copiado!';
+  } catch {
+    button.textContent = 'No se pudo copiar';
+  }
+  copyTimers.set(button, setTimeout(() => { button.textContent = label; }, 1500));
 }
+
+function copyCode() {
+  copyText(myRoomCode, document.querySelector('.btn-copy'), '📋 Copiar código');
+}
+
+const copyWord = document.getElementById('copyWord');
+let wordToCopy = '';
+copyWord.addEventListener('click', () => copyText(wordToCopy, copyWord, 'Copiar palabra'));
 
 // --- Canvas ---
 function resizeCanvas() {
@@ -822,8 +864,6 @@ const hintText = document.getElementById('hintText');
 const connectionStatus = document.getElementById('connectionStatus');
 let pickerMode = '';
 let memeCatalog;
-let audio;
-let musicTimer;
 
 document.getElementById('chatForm').addEventListener('submit', (event) => {
   event.preventDefault();
@@ -917,42 +957,24 @@ socket.on('connect', () => {
   connectionStatus.textContent = '';
 });
 
-function playTone(frequency, when, duration, volume) {
-  const oscillator = audio.createOscillator();
-  const gain = audio.createGain();
-  oscillator.frequency.value = frequency;
-  gain.gain.setValueAtTime(0.001, when);
-  gain.gain.exponentialRampToValueAtTime(volume, when + 0.025);
-  gain.gain.exponentialRampToValueAtTime(0.001, when + duration);
-  oscillator.connect(gain).connect(audio.destination);
-  oscillator.start(when);
-  oscillator.stop(when + duration);
-}
-
-function playMelody(notes, spacing, volume) {
-  const start = audio.currentTime;
-  notes.forEach((note, index) => playTone(note, start + index * spacing, spacing, volume));
-}
-
-document.getElementById('musicToggle').addEventListener('click', async (event) => {
-  const button = event.currentTarget;
-  if (musicTimer) {
-    clearInterval(musicTimer);
-    musicTimer = undefined;
-    await audio.suspend();
-    button.setAttribute('aria-pressed', 'false');
-    button.textContent = '🎵 Música';
+document.getElementById('musicPanel').addEventListener('toggle', (event) => {
+  const container = document.getElementById('musicPlayer');
+  if (!event.currentTarget.open) {
+    container.replaceChildren();
     return;
   }
-  const Audio = window.AudioContext || window.webkitAudioContext;
-  if (!Audio) return;
-  audio ||= new Audio();
-  await audio.resume();
-  const music = () => playMelody([262, 330, 392, 330, 294, 349, 440, 392], 0.35, 0.025);
-  music();
-  musicTimer = setInterval(music, 4200);
-  button.setAttribute('aria-pressed', 'true');
-  button.textContent = '🔇 Silenciar';
+  if (container.firstElementChild) return;
+
+  const songs = ['Bag1gUxuU0g', 'cE6wxDqdOV0', 'o_1aF54DO60'];
+  const playerUrl = new URL(`https://www.youtube.com/embed/${songs[0]}`);
+  playerUrl.search = new URLSearchParams({ playlist: songs.slice(1).join(','), loop: '1', playsinline: '1' });
+  const player = document.createElement('iframe');
+  player.title = 'Lana Del Rey en YouTube';
+  player.src = playerUrl;
+  player.allow = 'encrypted-media; picture-in-picture; fullscreen';
+  player.allowFullscreen = true;
+  player.referrerPolicy = 'strict-origin-when-cross-origin';
+  container.append(player);
 });
 
 // --- Game events ---
@@ -963,6 +985,9 @@ socket.on('playerJoined', (data) => {
 
 socket.on('role', (data) => {
   myRole = data.role;
+  wordToCopy = data.role === 'drawer' ? data.word : '';
+  copyWord.hidden = !wordToCopy;
+  copyWord.textContent = 'Copiar palabra';
   const wordHint = document.getElementById('wordHint');
   const wordRole = document.getElementById('wordRole');
   const toolsBar = document.getElementById('toolsBar');
@@ -1003,7 +1028,6 @@ socket.on('timerUpdate', (time) => {
 });
 
 socket.on('roundEnd', (data) => {
-  if (musicTimer && data.guessed) playMelody([392, 494, 587, 784], 0.12, 0.085);
   const overlay = document.getElementById('roundOverlay');
   const emoji = document.getElementById('overlayEmoji');
   const title = document.getElementById('overlayTitle');
